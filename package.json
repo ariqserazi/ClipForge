@@ -1,0 +1,11 @@
+{
+  "name": "clipforge",
+  "version": "1.0.0",
+  "private": true,
+  "description": "A macOS Adobe Premiere Pro CEP extension for generating random broll clips with ffmpeg.",
+  "scripts": {
+    "validate": "node scripts/validate.mjs",
+    "zip": "node scripts/zip.mjs"
+  },
+  "license": "MIT"
+}
