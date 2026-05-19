@@ -30,6 +30,12 @@ The clip generation behavior follows the provided shell workflow closely:
 - `ffmpeg` and `ffprobe`
 - Node.js if you want to run the local validation and zip scripts
 
+## Windows Version
+
+If you want the Windows version of ClipForge, go here:
+
+[ClipForge-WindowsVersion](https://github.com/ariqserazi/ClipForge-WindowsVersion)
+
 ## Install ffmpeg
 
 Install `ffmpeg` with Homebrew:
