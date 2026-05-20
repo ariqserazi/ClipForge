@@ -1,12 +1,13 @@
 # ClipForge
 
-ClipForge is a macOS Adobe Premiere Pro CEP extension that generates random broll clips from local video files with `ffmpeg` and `ffprobe`, then optionally imports those generated clips into the current Premiere Pro project.
+ClipForge is a macOS Adobe Premiere Pro CEP extension that generates broll clips from local video files with `ffmpeg` and `ffprobe`, then optionally imports those generated clips into the current Premiere Pro project.
 
 The clip generation behavior follows the provided shell workflow closely:
 
 - scan only the top level of the input folder
 - support `mp4`, `mkv`, `mov`, `avi`, and `m4v`
-- randomly choose a source video for each output clip
+- when `Randomize Start Times` is on, randomly choose a source video and a valid start point for each output clip
+- when `Randomize Start Times` is off, create clips sequentially through each source file before moving to the next one
 - use `ffprobe` to read duration
 - skip source files that are too short
 - avoid the first and last 90 seconds by default
@@ -19,6 +20,7 @@ The clip generation behavior follows the provided shell workflow closely:
 - Clean dark UI built with vanilla HTML, CSS, and JavaScript
 - Uses Node inside CEP via `child_process`
 - Uses ExtendScript to import generated clips into the current Premiere project
+- Supports both randomized clip selection and sequential clip generation with a panel toggle
 - Live panel log with readable progress and error messages
 - Manual CEP install flow for macOS
 - Validation script for the required project files and CEP wiring
@@ -122,7 +124,7 @@ If your Premiere build labels CEP panels as legacy, also check:
 2. Open `Window > Extensions > ClipForge`.
 3. Choose or enter an input folder.
 4. Choose or enter an output folder.
-5. Set clip count, clip length, skip first seconds, and skip last seconds.
+5. Set clip count, clip length, skip first seconds, skip last seconds, and whether to randomize start times.
 6. Click `Generate Clips`.
 7. Watch the panel log as `ffprobe` checks durations and `ffmpeg` creates clips.
 8. Click `Import Generated Clips`.
@@ -136,6 +138,7 @@ Default values:
 - Clip length: `6`
 - Skip first seconds: `90`
 - Skip last seconds: `90`
+- Randomize start times: `Off`
 
 ## Development
 
@@ -202,6 +205,8 @@ ClipForge tries these locations:
 - Make sure the input folder contains supported video files at the top level
 - Very short source videos are skipped
 - If `skip first seconds` and `skip last seconds` leave no valid start range, the video will be skipped
+- If `randomize start times` is off, ClipForge walks forward through each source file in `clip length` steps, then moves to the next source file
+- If there is not enough usable footage for the requested clip count in sequential mode, ClipForge logs that and stops after the available clips
 - Read the panel log for the exact source file that failed or was skipped
 
 ### Import failed

@@ -14,7 +14,8 @@
     clipCount: 30,
     clipLength: 6,
     skipFirstSeconds: 90,
-    skipLastSeconds: 90
+    skipLastSeconds: 90,
+    randomizeStartTimes: false
   }
 
   var SUPPORTED_EXTENSIONS = {
@@ -46,7 +47,7 @@
     bindEvents()
     setStatus("Ready")
     log("ClipForge ready.")
-    log("This panel generates random silent H.264 broll clips from local source videos.")
+    log("This panel generates silent H.264 broll clips from local source videos.")
     checkDependencies(false)
   }
 
@@ -57,6 +58,7 @@
     dom.clipLength = document.getElementById("clipLength")
     dom.skipFirstSeconds = document.getElementById("skipFirstSeconds")
     dom.skipLastSeconds = document.getElementById("skipLastSeconds")
+    dom.randomizeStartTimes = document.getElementById("randomizeStartTimes")
     dom.generateButton = document.getElementById("generateButton")
     dom.importButton = document.getElementById("importButton")
     dom.clearLogButton = document.getElementById("clearLogButton")
@@ -83,7 +85,8 @@
       dom.clipCount,
       dom.clipLength,
       dom.skipFirstSeconds,
-      dom.skipLastSeconds
+      dom.skipLastSeconds,
+      dom.randomizeStartTimes
     ].forEach(function (element) {
       element.addEventListener("change", persistSettings)
       element.addEventListener("input", persistSettings)
@@ -125,7 +128,10 @@
       clipCount: savedSettings && savedSettings.clipCount ? savedSettings.clipCount : DEFAULT_SETTINGS.clipCount,
       clipLength: savedSettings && savedSettings.clipLength ? savedSettings.clipLength : DEFAULT_SETTINGS.clipLength,
       skipFirstSeconds: savedSettings && savedSettings.skipFirstSeconds >= 0 ? savedSettings.skipFirstSeconds : DEFAULT_SETTINGS.skipFirstSeconds,
-      skipLastSeconds: savedSettings && savedSettings.skipLastSeconds >= 0 ? savedSettings.skipLastSeconds : DEFAULT_SETTINGS.skipLastSeconds
+      skipLastSeconds: savedSettings && savedSettings.skipLastSeconds >= 0 ? savedSettings.skipLastSeconds : DEFAULT_SETTINGS.skipLastSeconds,
+      randomizeStartTimes: savedSettings && typeof savedSettings.randomizeStartTimes === "boolean"
+        ? savedSettings.randomizeStartTimes
+        : DEFAULT_SETTINGS.randomizeStartTimes
     }
 
     dom.inputFolder.value = merged.inputFolder
@@ -134,6 +140,7 @@
     dom.clipLength.value = merged.clipLength
     dom.skipFirstSeconds.value = merged.skipFirstSeconds
     dom.skipLastSeconds.value = merged.skipLastSeconds
+    dom.randomizeStartTimes.checked = merged.randomizeStartTimes
   }
 
   function persistSettings() {
@@ -164,7 +171,8 @@
       clipCount: Number(dom.clipCount.value),
       clipLength: Number(dom.clipLength.value),
       skipFirstSeconds: Number(dom.skipFirstSeconds.value),
-      skipLastSeconds: Number(dom.skipLastSeconds.value)
+      skipLastSeconds: Number(dom.skipLastSeconds.value),
+      randomizeStartTimes: Boolean(dom.randomizeStartTimes.checked)
     }
   }
 
@@ -276,7 +284,48 @@
     })
   }
 
-  async function generateRandomClip(settings, index, sourceFiles) {
+  async function buildSequentialClipPlan(settings, sourceFiles) {
+    var plan = []
+    var sourceIndex
+
+    for (sourceIndex = 0; sourceIndex < sourceFiles.length; sourceIndex += 1) {
+      var sourcePath = sourceFiles[sourceIndex]
+      var durationRaw = await getVideoDuration(sourcePath)
+      var duration = durationRaw === null ? null : Math.floor(durationRaw)
+      var minStart = settings.skipFirstSeconds
+      var maxStart
+      var start
+
+      if (duration === null) {
+        log("Could not read duration. Skipping:")
+        log(sourcePath)
+        continue
+      }
+
+      maxStart = duration - settings.clipLength - settings.skipLastSeconds
+
+      if (maxStart < minStart) {
+        log("Video too short for sequential mode. Skipping:")
+        log(sourcePath)
+        continue
+      }
+
+      for (start = minStart; start <= maxStart; start += settings.clipLength) {
+        plan.push({
+          sourcePath: sourcePath,
+          start: start
+        })
+
+        if (plan.length >= settings.clipCount) {
+          return plan
+        }
+      }
+    }
+
+    return plan
+  }
+
+  async function generateClip(settings, index, sourceFiles) {
     var randomIndex = Math.floor(Math.random() * sourceFiles.length)
     var sourcePath = sourceFiles[randomIndex]
     var durationRaw = await getVideoDuration(sourcePath)
@@ -295,15 +344,57 @@
 
     maxStart = duration - settings.clipLength - settings.skipLastSeconds
 
-    if (maxStart <= minStart) {
+    if (maxStart < minStart) {
       log("Video too short. Skipping:")
       log(sourcePath)
       return null
     }
 
-    start = Math.floor(Math.random() * (maxStart - minStart + 1)) + minStart
+    if (settings.randomizeStartTimes) {
+      start = Math.floor(Math.random() * (maxStart - minStart + 1)) + minStart
+    } else {
+      start = minStart
+    }
+
     outputName = "broll_" + String(index).padStart(4, "0") + ".mp4"
     outputPath = path.join(settings.outputFolder, outputName)
+
+    if (fs.existsSync(outputPath)) {
+      log("Overwriting existing output because ffmpeg is running with -y:")
+      log(outputPath)
+    }
+
+    log("Creating " + outputName + " from " + path.basename(sourcePath) + " at " + start + " seconds...")
+
+    await runFfmpeg([
+      "-y",
+      "-hide_banner",
+      "-loglevel",
+      "error",
+      "-ss",
+      String(start),
+      "-i",
+      sourcePath,
+      "-t",
+      String(settings.clipLength),
+      "-an",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      outputPath
+    ])
+
+    return outputPath
+  }
+
+  async function generatePlannedClip(settings, index, plannedClip) {
+    var sourcePath = plannedClip.sourcePath
+    var start = plannedClip.start
+    var outputName = "broll_" + String(index).padStart(4, "0") + ".mp4"
+    var outputPath = path.join(settings.outputFolder, outputName)
 
     if (fs.existsSync(outputPath)) {
       log("Overwriting existing output because ffmpeg is running with -y:")
@@ -343,6 +434,7 @@
 
     var settings
     var sourceFiles
+    var sequentialPlan
     var generatedFiles = []
     var index
 
@@ -365,12 +457,37 @@
       log("Saving clips to:")
       log(settings.outputFolder)
       log("")
+      log("Randomize start times: " + (settings.randomizeStartTimes ? "On" : "Off"))
+      log("")
+
+      if (!settings.randomizeStartTimes) {
+        log("Sequential mode is on. Clips will move forward through each source file before switching to the next one.")
+        log("")
+        sequentialPlan = await buildSequentialClipPlan(settings, sourceFiles)
+
+        if (!sequentialPlan.length) {
+          throw new Error("No usable sequential clips could be planned from the current source files.")
+        }
+
+        if (sequentialPlan.length < settings.clipCount) {
+          log("Only " + sequentialPlan.length + " sequential clip(s) fit within the available source footage.")
+          log("Requested " + settings.clipCount + " clip(s). Generation will stop after the usable sequential clips are created.")
+          log("")
+        }
+      }
 
       for (index = 1; index <= settings.clipCount; index += 1) {
-        setStatus("Generating clip " + index + " of " + settings.clipCount + "...")
+        if (!settings.randomizeStartTimes && index > sequentialPlan.length) {
+          break
+        }
+
+        setStatus("Generating clip " + index + " of " + (settings.randomizeStartTimes ? settings.clipCount : sequentialPlan.length) + "...")
 
         try {
-          var generatedPath = await generateRandomClip(settings, index, sourceFiles)
+          var generatedPath = settings.randomizeStartTimes
+            ? await generateClip(settings, index, sourceFiles)
+            : await generatePlannedClip(settings, index, sequentialPlan[index - 1])
+
           if (generatedPath) {
             generatedFiles.push(generatedPath)
           }
@@ -570,7 +687,9 @@
     ensureOutputFolder: ensureOutputFolder,
     findVideoFiles: findVideoFiles,
     getVideoDuration: getVideoDuration,
-    generateRandomClip: generateRandomClip,
+    buildSequentialClipPlan: buildSequentialClipPlan,
+    generateClip: generateClip,
+    generatePlannedClip: generatePlannedClip,
     generateClips: generateClips,
     importGeneratedClips: importGeneratedClips,
     clearLog: clearLog
