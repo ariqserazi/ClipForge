@@ -3,65 +3,89 @@ import path from "node:path"
 import { spawnSync } from "node:child_process"
 
 const root = path.resolve(process.cwd())
+
 const requiredFiles = [
-  "AGENTS.md",
-  ".debug",
   ".gitignore",
-  "CSXS/manifest.xml",
-  "assets/icons/icon-dark.svg",
-  "assets/icons/icon-light.svg",
-  "index.html",
-  "jsx/clipforge-host.jsx",
-  "lib/CSInterface.js",
-  "package.json",
-  "README.md",
   "LICENSE",
+  "README.md",
+  "package.json",
   "scripts/validate.mjs",
-  "src/main.js",
-  "src/styles.css"
+  "src/main/main.js",
+  "src/main/preload.js",
+  "src/main/ipcHandlers.js",
+  "src/renderer/index.html",
+  "src/renderer/styles.css",
+  "src/renderer/app.js",
+  "src/core/clipGenerator.js",
+  "src/core/ffmpegTools.js",
+  "src/core/settingsStore.js",
+  "src/core/validation.js",
+  "src/core/videoScanner.js",
+  "src/assets/icons/README.md"
+]
+
+const removedPaths = [
+  ".debug",
+  "CSXS",
+  "jsx",
+  "lib",
+  "scripts/zip.mjs",
+  "index.html"
 ]
 
 for (const relativeFile of requiredFiles) {
   const absoluteFile = path.join(root, relativeFile)
+
   if (!fs.existsSync(absoluteFile)) {
     throw new Error(`Missing required file: ${relativeFile}`)
   }
 }
 
-JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))
+for (const relativePath of removedPaths) {
+  const absolutePath = path.join(root, relativePath)
 
-const manifestXml = fs.readFileSync(path.join(root, "CSXS/manifest.xml"), "utf8")
-if (!manifestXml.includes("ClipForge")) {
-  throw new Error("manifest.xml must contain the ClipForge extension name.")
+  if (fs.existsSync(absolutePath)) {
+    throw new Error(`Removed extension path should not remain: ${relativePath}`)
+  }
 }
 
-if (!manifestXml.includes("--enable-nodejs")) {
-  throw new Error("manifest.xml must enable Node with --enable-nodejs.")
+const packageJson = JSON.parse(fs.readFileSync(path.join(root, "package.json"), "utf8"))
+
+if (packageJson.name !== "shortscreator") {
+  throw new Error("package.json name must be shortscreator.")
 }
 
-const mainJs = fs.readFileSync(path.join(root, "src/main.js"), "utf8")
-if (!mainJs.includes("child_process")) {
-  throw new Error("src/main.js must use Node child_process.")
+if (packageJson.build?.productName !== "shortsCreator") {
+  throw new Error("electron-builder productName must be shortsCreator.")
 }
 
-const hostJsx = fs.readFileSync(path.join(root, "jsx/clipforge-host.jsx"), "utf8")
-if (!hostJsx.includes("importFiles")) {
-  throw new Error("jsx/clipforge-host.jsx must contain an importFiles function.")
+for (const scriptName of ["dev", "start", "build", "build:mac", "build:win", "dist", "validate"]) {
+  if (!packageJson.scripts?.[scriptName]) {
+    throw new Error(`Missing package script: ${scriptName}`)
+  }
 }
 
-for (const file of [
+const sourceFilesToCheck = [
   "scripts/validate.mjs",
-  "scripts/zip.mjs",
-  "lib/CSInterface.js",
-  "src/main.js"
-]) {
-  const result = spawnSync(process.execPath, ["--check", path.join(root, file)], {
+  "src/main/main.js",
+  "src/main/preload.js",
+  "src/main/ipcHandlers.js",
+  "src/renderer/app.js",
+  "src/core/clipGenerator.js",
+  "src/core/ffmpegTools.js",
+  "src/core/settingsStore.js",
+  "src/core/validation.js",
+  "src/core/videoScanner.js"
+]
+
+for (const relativeFile of sourceFilesToCheck) {
+  const result = spawnSync(process.execPath, ["--check", path.join(root, relativeFile)], {
     encoding: "utf8"
   })
 
   if (result.status !== 0) {
-    throw new Error(`Syntax check failed for ${file}\n${result.stderr}`)
+    throw new Error(`Syntax check failed for ${relativeFile}\n${result.stderr}`)
   }
 }
 
-console.log("ClipForge validation passed.")
+console.log("shortsCreator validation passed.")
